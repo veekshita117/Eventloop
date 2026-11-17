@@ -51,6 +51,7 @@ builder.Services.AddSingleton<IRegistrationEventPublisher, AzureQueueRegistratio
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<IRegistrationService, RegistrationService>();
 builder.Services.AddScoped<IEventService, EventService>();
+builder.Services.AddScoped<ICheckInService, CheckInService>();
 
 // JWT Configuration
 builder.Services.Configure<JwtSettings>(builder.Configuration.GetSection(JwtSettings.SectionName));

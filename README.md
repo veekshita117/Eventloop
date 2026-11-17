@@ -124,7 +124,7 @@ dotnet test backend/Eventloop.Tests/Eventloop.Tests.csproj
 
 ---
 
-## API Endpoints (Phase 1, 2, 3 & 4)
+## API Endpoints (Phases 1-6)
 
 | Method | Endpoint | Access | Description |
 |---|---|---|---|
@@ -144,6 +144,10 @@ dotnet test backend/Eventloop.Tests/Eventloop.Tests.csproj
 | `DELETE` | `/api/events/{id}/register` | Authenticated | Cancel my registration (auto-promotes next waitlisted user and renumbers queue) |
 | `GET` | `/api/me/registrations` | Authenticated | Retrieve current user's registered tickets and waitlist statuses |
 | `GET` | `/api/events/{id}/registrations` | Organizer / Admin | View attendee roster with status and search filters (validates ownership) |
+| `GET` | `/api/registrations/{id}/ticket` | Ticket Owner / Org / Admin | Get ticket details and TicketCode GUID for QR code rendering |
+| `POST` | `/api/events/{id}/check-in` | Organizer / Admin | Check-in ticket with concurrency safety against double scans |
+| `GET` | `/api/events/{id}/stats` | Organizer / Admin | Attendance statistics with explicit SQL interval and daily velocity |
+| `GET` | `/api/events/{id}/attendees.csv` | Organizer / Admin | Export complete attendee roster with check-in records to CSV |
 
 ---
 
@@ -210,3 +214,20 @@ dotnet test backend/Eventloop.Tests/Eventloop.Tests.csproj
   - Added `ReminderSentAt` migration to track delivered reminders and eliminate duplicate notifications
   - Configurable `IEmailSender` with `ConsoleEmailSender` (local dev) and `AzureCommunicationServicesEmailSender` (production)
   - 70 unit and integration tests passing across all components
+- [x] **Phase 6: Tickets, Check-In and Attendance Statistics**
+  - Secure ticket data endpoint (`GET /api/registrations/{id}/ticket`) for attendee QR rendering with ticket code GUID
+  - Concurrency-safe door check-in endpoint (`POST /api/events/{id}/check-in`) with keyed semaphore locks protecting against rapid double-scans
+  - Strict check-in validation returning explicit RFC 7807 responses:
+    - `200 OK` on successful scan with attendee name, check-in timestamp, and scanner ID
+    - `409 Conflict` on already checked-in tickets indicating original check-in time and scanner
+    - `400 Bad Request` on wrong-event, cancelled, or waitlisted registrations
+    - `404 Not Found` on non-existent ticket codes
+    - `403 Forbidden` on unauthorized scanner attempts (only event organizer or Admin permitted)
+  - Hand-written SQL attendance statistics (`GET /api/events/{id}/stats`):
+    - Confirmed, checked-in, waitlisted, and cancelled metrics
+    - No-show rate calculation: `(Confirmed / (Confirmed + CheckedIn)) * 100`
+    - Check-in velocity: 15-minute interval bucketing using `(DATEDIFF(minute, 0, CheckedInAt) / 15) * 15`
+    - Registration velocity: daily signups using `CAST(RegisteredAt AS DATE)`
+    - High-performance InMemory test aggregation fallback for rapid test isolation
+  - Organizer attendee CSV export (`GET /api/events/{id}/attendees.csv`) with full formatting, status sorting, and delimiter escaping
+  - 92 unit and integration tests passing across all components
