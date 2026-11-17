@@ -109,7 +109,7 @@ dotnet test backend/Eventloop.Tests/Eventloop.Tests.csproj
 
 ---
 
-## API Endpoints (Phase 1, 2 & 3)
+## API Endpoints (Phase 1, 2, 3 & 4)
 
 | Method | Endpoint | Access | Description |
 |---|---|---|---|
@@ -125,6 +125,19 @@ dotnet test backend/Eventloop.Tests/Eventloop.Tests.csproj
 | `DELETE` | `/api/events/{id}` | Organizer / Admin | Delete event (Draft only; validates ownership) |
 | `POST` | `/api/events/{id}/publish` | Organizer / Admin | Publish draft event (validates ownership) |
 | `POST` | `/api/events/{id}/cancel` | Organizer / Admin | Cancel event (validates ownership) |
+| `POST` | `/api/events/{id}/register` | Authenticated | Register for event (creates Confirmed ticket or assigns next Waitlist position) |
+| `DELETE` | `/api/events/{id}/register` | Authenticated | Cancel my registration (auto-promotes next waitlisted user and renumbers queue) |
+| `GET` | `/api/me/registrations` | Authenticated | Retrieve current user's registered tickets and waitlist statuses |
+| `GET` | `/api/events/{id}/registrations` | Organizer / Admin | View attendee roster with status and search filters (validates ownership) |
+
+---
+
+## Concurrency Protection & Waitlist Architecture
+
+1. **Row-Level Locking (`WITH (UPDLOCK, ROWLOCK)`)**: In SQL Server, the registration query locks the specific `Event` row within a transaction. Any concurrent registration attempt for the same event must wait, guaranteeing that the capacity evaluation (`confirmedCount < Capacity`) is serialized and race-free.
+2. **Keyed In-Memory Concurrency Semaphore**: Synchronizes concurrent registration calls per event in application memory, providing thread-safe concurrency guarantees in test environments (EF Core InMemory).
+3. **Database-Level Unique Constraint**: A `UNIQUE (EventId, UserId)` index guarantees that a student cannot register twice even under intense concurrent submission attempts.
+4. **Decoupled Event Publishing**: `IRegistrationEventPublisher` emits event notifications (`PublishTicketIssuedAsync`, `PublishWaitlistPromotedAsync`) outside the core transaction so email or background processing remains non-blocking.
 
 ---
 
@@ -160,7 +173,15 @@ dotnet test backend/Eventloop.Tests/Eventloop.Tests.csproj
   - Ownership enforcement: Organizers may only manage their own events; Admins can manage all
   - State machine restrictions: Only `Draft` events can be deleted or published; completed/cancelled events cannot be modified
   - Capacity rules: Enforced `Capacity > 0`; capacity can be increased post-publish, but cannot be reduced below confirmed registrations
-  - TODO hook for waitlist auto-promotion upon capacity increase (Phase 4 integration)
   - Public events feed with title search, date range filters, "has spots" filter, dynamic sorting, and pagination
   - Public event details with real-time `confirmedCount`, `waitlistCount`, `spotsLeft`, and `isSoldOut` calculations
-  - 52 unit, validation, service, and controller tests passing
+- [x] **Phase 4: Registration, Waitlist and Concurrency**
+  - Concurrency-safe event registration (`POST /api/events/{id}/register`)
+  - Automatic waitlist placement with sequential position numbering when capacity is exhausted
+  - Spot vacancy auto-promotion: cancelling a confirmed registration automatically promotes the lowest waitlist position in the same transaction
+  - Capacity expansion promotion: raising event capacity automatically promotes waitlisted students for all new spots
+  - Sequential waitlist renumbering on cancellations and promotions (no queue gaps)
+  - Decoupled `IRegistrationEventPublisher` for asynchronous notification delivery
+  - Student registration management (`GET /api/me/registrations`, `DELETE /api/events/{id}/register`)
+  - Organizer attendee roster query with filters (`GET /api/events/{id}/registrations`)
+  - 63 unit, integration, and parallel concurrency tests passing

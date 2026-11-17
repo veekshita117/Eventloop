@@ -33,7 +33,9 @@ builder.Services.AddDbContext<ApplicationDbContext>(options =>
 builder.Services.AddScoped<ICurrentUserService, CurrentUserService>();
 builder.Services.AddSingleton<IPasswordHasher, BCryptPasswordHasher>();
 builder.Services.AddSingleton<IJwtTokenGenerator, JwtTokenGenerator>();
+builder.Services.AddSingleton<IRegistrationEventPublisher, LoggingRegistrationEventPublisher>();
 builder.Services.AddScoped<IAuthService, AuthService>();
+builder.Services.AddScoped<IRegistrationService, RegistrationService>();
 builder.Services.AddScoped<IEventService, EventService>();
 
 // JWT Configuration

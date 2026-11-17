@@ -2,6 +2,7 @@ using Eventloop.Core.DTOs.Events;
 using Eventloop.Core.Entities;
 using Eventloop.Core.Enums;
 using Eventloop.Core.Exceptions;
+using Eventloop.Core.Interfaces;
 using Eventloop.Infrastructure.Data;
 using Eventloop.Infrastructure.Services;
 using FluentAssertions;
@@ -25,7 +26,9 @@ public class EventServiceTests
             .Options;
 
         _context = new ApplicationDbContext(dbOptions);
-        _service = new EventService(_context);
+        var publisherMock = new Moq.Mock<IRegistrationEventPublisher>();
+        var registrationService = new RegistrationService(_context, publisherMock.Object);
+        _service = new EventService(_context, registrationService);
 
         _organizer1 = new User
         {

@@ -12,10 +12,12 @@ namespace Eventloop.Infrastructure.Services;
 public class EventService : IEventService
 {
     private readonly ApplicationDbContext _context;
+    private readonly IRegistrationService _registrationService;
 
-    public EventService(ApplicationDbContext context)
+    public EventService(ApplicationDbContext context, IRegistrationService registrationService)
     {
         _context = context;
+        _registrationService = registrationService;
     }
 
     public async Task<EventResponseDto> CreateEventAsync(CreateEventRequestDto request, Guid organizerId, CancellationToken cancellationToken = default)
@@ -84,10 +86,6 @@ public class EventService : IEventService
         }
 
         var previousCapacity = eventEntity.Capacity;
-        if (request.Capacity > previousCapacity && waitlistCount > 0)
-        {
-            // TODO (Phase 4): Auto-promote waitlisted registrations when capacity is increased.
-        }
 
         eventEntity.Title = request.Title.Trim();
         eventEntity.Description = request.Description.Trim();
@@ -97,6 +95,13 @@ public class EventService : IEventService
         eventEntity.Capacity = request.Capacity;
 
         await _context.SaveChangesAsync(cancellationToken);
+
+        // When capacity is increased, promote waitlisted users for the newly available spots
+        if (request.Capacity > previousCapacity && waitlistCount > 0)
+        {
+            var spotsOpened = request.Capacity - previousCapacity;
+            await _registrationService.PromoteWaitlistedAttendeesAsync(eventId, spotsOpened, cancellationToken);
+        }
 
         return MapToEventResponseDto(eventEntity, eventEntity.Organizer.Name, confirmedCount, waitlistCount);
     }
