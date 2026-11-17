@@ -1,112 +1,188 @@
 # Eventloop
 
-**Eventloop** is a college event registration and check-in platform. Clubs publish events, students register and receive a secure QR ticket, and organizers scan tickets at the door. When an event reaches maximum capacity, registrations queue onto a sequential waitlist and automatically promote when a spot becomes available.
+A college event registration and check-in platform. Clubs publish events, students register and receive a QR ticket, and organizers scan tickets at the door. When an event is full, students join a waitlist and are promoted automatically when a spot opens.
+
+Built with **ASP.NET Core (.NET 8)**, **Entity Framework Core**, **SQL Server**, **Azure Queue Storage and Azure Functions**, and **React + TypeScript**, with CI/CD on GitHub Actions and hosting on Azure.
 
 ---
 
-## Architecture Overview
+## Features
 
-Eventloop is built as a clean, intermediate-level monorepo with separation of concerns:
+**Students**
+- Register and log in with JWT authentication.
+- Browse published events with title search, date filters, a "has spots" filter, sorting and pagination.
+- Register for an event and get a confirmed ticket, or join the waitlist when it is full and see your queue position.
+- Cancel a registration at any time before check-in.
+- View tickets in "My Tickets", each with a QR code and a copyable ticket code.
+- Receive emails for ticket confirmation, waitlist promotion, cancellation, and a reminder within 24 hours of the event.
+
+**Organizers**
+- Create, edit, publish, cancel and delete (drafts only) their own events.
+- Raise an event's capacity after publishing; waitlisted students are promoted for the new spots.
+- View the attendee roster with status filters and search, and export it as CSV.
+- Check attendees in at the door by scanning the QR code with a camera, or by typing the ticket code.
+- See attendance statistics: confirmed, checked-in, waitlisted and cancelled counts, no-show rate, check-ins per 15-minute interval and sign-ups per day.
+
+**Admins**
+- Everything organizers can do, across all events, plus promoting users to the Organizer role.
+
+---
+
+## Tech Stack
+
+| Layer | Technology |
+|---|---|
+| API | ASP.NET Core Web API (.NET 8) |
+| Data access | Entity Framework Core 8, EF Core migrations, hand-written SQL for statistics |
+| Database | SQL Server (Docker locally, Azure SQL in production) |
+| Background jobs | Azure Functions (isolated worker, Queue and Timer triggers) |
+| Messaging | Azure Queue Storage (Azurite locally) |
+| Email | Azure Communication Services Email, or a console logger for development |
+| Auth | JWT bearer tokens, BCrypt.Net, role-based policies |
+| Validation | FluentValidation |
+| API docs | Swagger / OpenAPI with JWT support (development environment) |
+| Telemetry | Application Insights (API and Functions) |
+| Frontend | React 18, TypeScript, Vite, React Router 6, TanStack Query 5, Tailwind CSS |
+| Frontend libraries | qrcode.react (ticket QR), html5-qrcode (camera scanner), Recharts (charts), Lucide icons |
+| Backend tests | xUnit, FluentAssertions, Moq, EF Core InMemory, Coverlet |
+| Frontend tests | Vitest, React Testing Library, jsdom |
+| CI/CD | GitHub Actions |
+| Hosting | Azure App Service, Azure Functions, Azure Static Web Apps, Azure SQL Database |
+
+---
+
+## Architecture
+
+```
+                    React SPA (Vite)
+                          |
+                  HTTPS + JWT (REST)
+                          v
+   +---------------- ASP.NET Core API ----------------+
+   | Controllers -> Validators -> Services -> EF Core  |
+   +---------+-------------------------------+--------+
+             |                               |
+             | enqueue after commit          v
+             v                         SQL Server / Azure SQL
+   Azure Queue Storage                       ^
+   (registration-events)                     |
+             |                               |
+             v                               |
+   +----------------- Azure Functions -------+--------+
+   | Queue trigger: send ticket / promotion /          |
+   |                cancellation emails                |
+   | Timer trigger: daily 24-hour reminders (08:00 UTC)|
+   +-----------------------+---------------------------+
+                           |
+                           v
+                  Email (ACS or console)
+```
+
+The API never sends email itself. After a registration changes, it puts a small message on a queue, and a separate Azure Functions app reads it and sends the email. A slow or failing email provider therefore cannot slow down or break registration.
+
+### Project structure
 
 ```
 eventloop/
+├── .github/workflows/          ci.yml, deploy.yml
 ├── backend/
 │   ├── Eventloop.sln
-│   ├── Eventloop.Core/           # Domain Entities, Enums, Interfaces
-│   ├── Eventloop.Infrastructure/ # EF Core DbContext, Fluent Configurations, Migrations
-│   ├── Eventloop.Api/            # ASP.NET Core Web API, Controllers, Middleware, Swagger
-│   ├── Eventloop.Functions/      # Azure Functions (Isolated Worker Model) for background jobs
-│   └── Eventloop.Tests/          # xUnit, FluentAssertions unit & integration test suite
-├── frontend/                     # React + TypeScript (Vite) [Scaffolded in Phase 7]
-├── docker-compose.yml            # Local development dependencies (SQL Server + Azurite)
-└── README.md
+│   ├── Eventloop.Api/              controllers, validators, middleware, Program.cs
+│   ├── Eventloop.Core/             entities, enums, DTOs, interfaces, messages, exceptions
+│   ├── Eventloop.Infrastructure/   DbContext, configurations, migrations, services, email
+│   ├── Eventloop.Functions/        Azure Functions (queue and timer triggers)
+│   └── Eventloop.Tests/            xUnit tests
+├── frontend/
+│   └── src/
+│       ├── api/                    typed API client modules
+│       ├── components/             shared UI and layout
+│       ├── context/                auth and toast providers
+│       ├── features/               auth, events, tickets, organizer
+│       └── test/                   Vitest tests
+├── docs/AZURE_DEPLOYMENT_GUIDE.md
+└── docker-compose.yml              SQL Server and Azurite for local development
 ```
 
-### Tech Stack
-- **Backend Framework**: ASP.NET Core Web API (.NET 8 LTS)
-- **Data Access**: Entity Framework Core with SQL Server (LocalDB / Docker locally, Azure SQL in production)
-- **Background Jobs**: Azure Functions isolated worker (Queue & Timer triggers) + Azure Queue Storage (Azurite locally)
-- **Authentication**: JWT Bearer Tokens with BCrypt password hashing
-- **Frontend**: React + TypeScript (Vite), React Router, TanStack Query, Tailwind CSS
-- **Testing**: xUnit + FluentAssertions for backend; Vitest + React Testing Library for frontend
+### Design rules
+
+- Controllers are thin and call services through interfaces such as `IRegistrationService` and `ICheckInService`.
+- API input and output use DTOs; EF entities are never exposed.
+- A global exception middleware converts domain exceptions into consistent `ProblemDetails` responses.
+- Authorization policies: `RequireOrganizer` (Organizer or Admin) and `RequireAdmin`.
+- Event ownership is enforced in the service layer, so organizers can only manage their own events.
 
 ---
 
-## Local Development Setup
+## Data Model
+
+| Table | Key columns and rules |
+|---|---|
+| `Users` | `Id`, `Name`, `Email` (unique), `PasswordHash`, `Role` (Student, Organizer, Admin), `CreatedAt` |
+| `Events` | `Id`, `OrganizerId`, `Title`, `Description`, `Venue`, `StartTime`, `EndTime`, `Capacity` (check constraint `Capacity > 0`), `Status` (Draft, Published, Cancelled, Completed), `CreatedAt`, `RowVersion` |
+| `Registrations` | `Id`, `EventId`, `UserId`, `Status` (Confirmed, Waitlisted, Cancelled, CheckedIn), `WaitlistPosition`, `TicketCode` (unique), `RegisteredAt`, `CheckedInAt`, `CheckedInBy`, `ReminderSentAt` |
+
+Indexes and constraints on `Registrations`: a unique `(EventId, UserId)` so a student can't register twice, a unique `TicketCode` for fast scanner lookup, `(EventId, Status)` for capacity checks and roster filters, and indexes on every foreign key. `ReminderSentAt` makes sure each registration gets at most one reminder email.
+
+---
+
+## Getting Started
 
 ### Prerequisites
+
 - [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0)
-- [Docker Desktop](https://www.docker.com/) (for SQL Server and Azurite)
-- [Node.js 20+ & npm](https://nodejs.org/) (for frontend)
+- [Docker Desktop](https://www.docker.com/) (SQL Server and Azurite)
+- [Node.js 20 or later](https://nodejs.org/) and npm
+- [Azure Functions Core Tools](https://learn.microsoft.com/azure/azure-functions/functions-run-local) (optional, for `func start`)
 
----
-
-### Step 1: Start Local Infrastructure (SQL Server & Azurite)
-Run Docker Compose from the repository root:
+### 1. Start SQL Server and Azurite
 
 ```bash
 docker-compose up -d
 ```
 
-This spins up:
-- **SQL Server 2022**: `localhost:1433` (User: `sa`, Password: `YourStrong@Passw0rd!`)
-- **Azurite Storage Emulator**: Blob `10000`, Queue `10001`, Table `10002`
+This starts SQL Server 2022 on `localhost:1433` and the Azurite storage emulator (blob 10000, queue 10001, table 10002). The default SA password is set in `docker-compose.yml`; override it with the `MSSQL_SA_PASSWORD` environment variable.
 
----
-
-### Step 2: Configure Secrets (No Secrets in Source Control)
-Connection strings and JWT keys can be safely configured using .NET User Secrets:
+### 2. Configure secrets
 
 ```bash
 cd backend/Eventloop.Api
-dotnet user-secrets set "ConnectionStrings:DefaultConnection" "Server=localhost,1433;Database=EventloopDb;User Id=sa;Password=YourStrong@Passw0rd!;TrustServerCertificate=True;MultipleActiveResultSets=true"
-dotnet user-secrets set "Jwt:Key" "A-Very-Secure-Key-With-At-Least-32-Characters-Long!"
-dotnet user-secrets set "Jwt:Issuer" "EventloopApi"
-dotnet user-secrets set "Jwt:Audience" "EventloopApp"
+dotnet user-secrets init
+dotnet user-secrets set "ConnectionStrings:DefaultConnection" "Server=localhost,1433;Database=EventloopDb;User Id=sa;Password=<your-sa-password>;TrustServerCertificate=True;MultipleActiveResultSets=true"
+dotnet user-secrets set "Jwt:SecretKey" "<a-random-string-of-at-least-32-characters>"
 ```
 
----
+### 3. Create the database
 
-### Step 3: Run Database Migrations
-Apply the initial migration to your local SQL Server instance:
+From the repository root:
 
 ```bash
+dotnet tool restore
 dotnet tool run dotnet-ef database update --project backend/Eventloop.Infrastructure --startup-project backend/Eventloop.Api
 ```
 
----
-
-### Step 4: Run the Web API
-Start the ASP.NET Core Web API:
+### 4. Run the API
 
 ```bash
-dotnet run --project backend/Eventloop.Api/Eventloop.Api.csproj
+dotnet run --project backend/Eventloop.Api/Eventloop.Api.csproj --urls http://localhost:5000
 ```
 
-The API will listen on `http://localhost:5000` (or `https://localhost:5001`).
+- Swagger UI: `http://localhost:5000/swagger`
+- Health checks: `http://localhost:5000/health` and `http://localhost:5000/health/live`
 
-- **Swagger UI**: Visit [http://localhost:5000/swagger](http://localhost:5000/swagger)
-- **Health Check**: Visit [http://localhost:5000/health](http://localhost:5000/health)
+Port 5000 matters because the frontend dev server proxies `/api` there.
 
----
+### 5. Run the background jobs
 
-### Step 5: Run the Azure Functions Worker (Background Jobs)
-In a separate terminal window, start the isolated worker Functions app (reads from Azurite queue):
+In a second terminal:
 
 ```bash
 cd backend/Eventloop.Functions
 func start
-# OR using dotnet:
-dotnet run --project backend/Eventloop.Functions/Eventloop.Functions.csproj
 ```
 
-- **Queue Trigger**: Watches queue `registration-events` and dispatches confirmation/waitlist/cancellation emails.
-- **Timer Trigger**: Runs daily at 08:00 UTC to queue 24-hour event reminders.
+By default the Functions app reads the local Azurite queue and prints emails to the console instead of sending them.
 
----
-
-### Step 6: Run the Frontend (React + Vite + Tailwind)
-In a separate terminal window, install dependencies and start the Vite development server:
+### 6. Run the frontend
 
 ```bash
 cd frontend
@@ -114,205 +190,131 @@ npm install
 npm run dev
 ```
 
-The web application will open on [http://localhost:5173](http://localhost:5173) and proxy all `/api` requests to the ASP.NET Core backend on `http://localhost:5000`.
+The app runs at `http://localhost:5173`.
 
----
+### 7. Optional: load sample data
 
-### Step 7: Run Automated Tests
-
-**Backend xUnit Test Suite & Code Coverage**:
 ```bash
-dotnet test backend/Eventloop.Tests/Eventloop.Tests.csproj --collect:"XPlat Code Coverage"
+dotnet run --project backend/Eventloop.Api -- --seed
 ```
 
-**Frontend Vitest Suite**:
+This creates sample users, events, waitlists and check-in records so there is something to look at right away. It does nothing if the data already exists. The same seeding is also available as `POST /api/demo/seed`.
+
+### 8. Run the tests
+
 ```bash
+# Backend, with coverage
+dotnet test backend/Eventloop.Tests/Eventloop.Tests.csproj --collect:"XPlat Code Coverage"
+
+# Frontend
 cd frontend
 npm test
 ```
 
 ---
 
-### Step 8: Demo Data Seeding (Reviewer Quick-Start)
+## Configuration
 
-Eventloop includes a rich demo data seeder that provisions realistic sample data:
-- **Users**: Admin (`admin@eventloop.edu`), Organizers (`robotics@eventloop.edu`, `acm@eventloop.edu`), and 7 Students (Alice, Bob, Charlie, etc.). Password for all: `Password123!`.
-- **Events & State**:
-  - Full Event with Waitlist: *AI & Robotics Workshop* (Capacity 3, 3 Confirmed, 2 Waitlisted students).
-  - Live Event with Door Scans: *Annual Hackathon 2026* (Capacity 10, 4 CheckedIn across distinct 15-min intervals, 2 Confirmed no-shows, 1 Cancelled).
-  - Open Registration Event: *Spring Tech Symposium* (Capacity 150, 138 spots open).
-  - Draft Event: *Club Executive Board Meeting* (Draft status).
-
-To seed data:
-- **Via CLI flag**: `dotnet run --project backend/Eventloop.Api -- --seed`
-- **Via REST endpoint**: `POST http://localhost:5000/api/demo/seed`
-- **Via Web UI**: Click the **"Reset / Seed Demo DB"** button on the Login page (`http://localhost:5173/login`), or click any quick-login reviewer badge to auto-fill credentials.
-
----
-
-## Deployment & Cloud Architecture
-
-See the detailed **[Azure Deployment Guide](docs/AZURE_DEPLOYMENT_GUIDE.md)** for step-by-step Azure portal setup, GitHub Actions secret configuration, and cost-effective provisioning (Free & Basic tiers).
-
-- **CI Workflow**: `.github/workflows/ci.yml` builds, tests (xUnit + Vitest), verifies TypeScript compilation, and collects backend coverage on every PR and push.
-- **CD Workflow**: `.github/workflows/deploy.yml` bundles and applies EF Core migrations to Azure SQL, deploys the Web API to Azure App Service, deploys background jobs to Azure Functions, and deploys the frontend to Azure Static Web Apps.
-- **Telemetry**: Full Application Insights telemetry enabled across both Web API (`Microsoft.ApplicationInsights.AspNetCore`) and Azure Functions (`Microsoft.Azure.Functions.Worker.ApplicationInsights`).
-
----
-
-## Data Model & Constraints Summary
-
-| Entity | Fields | Key Rules & Constraints |
+| Setting | Used by | Purpose |
 |---|---|---|
-| **Users** | `Id`, `Name`, `Email`, `PasswordHash`, `Role`, `CreatedAt` | Unique index on `Email`; enum conversion for `Role` (`Student`, `Organizer`, `Admin`). |
-| **Events** | `Id`, `OrganizerId`, `Title`, `Description`, `Venue`, `StartTime`, `EndTime`, `Capacity`, `Status`, `CreatedAt`, `RowVersion` | Check constraint `Capacity > 0`; `RowVersion` byte array mapped to `rowversion` for optimistic concurrency; index on `OrganizerId`. |
-| **Registrations** | `Id`, `EventId`, `UserId`, `Status`, `WaitlistPosition`, `TicketCode`, `RegisteredAt`, `CheckedInAt`, `CheckedInBy`, `ReminderSentAt` | Unique composite constraint on `(EventId, UserId)`; unique index on `TicketCode`; composite index on `(EventId, Status)`. Nullable `ReminderSentAt` ensures single 24-hour reminder delivery. |
+| `ConnectionStrings:DefaultConnection` | API, Functions | SQL Server connection string (Functions also accepts `SqlConnectionString`) |
+| `Jwt:SecretKey` | API | Token signing key; set your own, at least 32 characters |
+| `Jwt:Issuer`, `Jwt:Audience`, `Jwt:ExpiryInMinutes` | API | Token settings (default expiry is 24 hours) |
+| `Cors:AllowedOrigins` | API | Origins allowed to call the API (defaults to localhost dev ports) |
+| `AzureWebJobsStorage` | API, Functions | Storage connection string for the `registration-events` queue (the API falls back to `ConnectionStrings:AzureQueueStorage`, then to local Azurite) |
+| `Email:Provider` | API, Functions | `Console` (default) or `AzureCommunicationServices` |
+| `Email:AzureCommunicationServices:ConnectionString`, `:SenderAddress` | Functions | Azure Communication Services email settings |
+| `VITE_API_URL` | Frontend build | API base URL for production builds; leave empty in development to use the proxy |
 
 ---
 
-## API Endpoints (Phases 1-6)
+## API Overview
+
+Interactive documentation is available through Swagger when the API runs in the development environment.
 
 | Method | Endpoint | Access | Description |
 |---|---|---|---|
-| `GET` | `/health` | Public | Service health and environment status |
-| `POST` | `/api/auth/register` | Public | Register new user (Student by default); returns JWT |
-| `POST` | `/api/auth/login` | Public | Authenticate user; returns JWT with role claim |
-| `GET` | `/api/auth/me` | Authenticated | Retrieve current user profile from JWT claims |
-| `POST` | `/api/users/{id}/promote-organizer` | Admin | Promote a user to Organizer role |
-| `GET` | `/api/events` | Public | List published events with search, date filters, "has spots", sorting & pagination |
-| `GET` | `/api/events/{id}` | Public | Event details with confirmed count, waitlist count, and spots left |
-| `POST` | `/api/events` | Organizer / Admin | Create a new event (starts as Draft) |
-| `PUT` | `/api/events/{id}` | Organizer / Admin | Update event details & capacity (validates ownership & capacity constraints) |
-| `DELETE` | `/api/events/{id}` | Organizer / Admin | Delete event (Draft only; validates ownership) |
-| `POST` | `/api/events/{id}/publish` | Organizer / Admin | Publish draft event (validates ownership) |
-| `POST` | `/api/events/{id}/cancel` | Organizer / Admin | Cancel event (validates ownership) |
-| `POST` | `/api/events/{id}/register` | Authenticated | Register for event (creates Confirmed ticket or assigns next Waitlist position) |
-| `DELETE` | `/api/events/{id}/register` | Authenticated | Cancel my registration (auto-promotes next waitlisted user and renumbers queue) |
-| `GET` | `/api/me/registrations` | Authenticated | Retrieve current user's registered tickets and waitlist statuses |
-| `GET` | `/api/events/{id}/registrations` | Organizer / Admin | View attendee roster with status and search filters (validates ownership) |
-| `GET` | `/api/registrations/{id}/ticket` | Ticket Owner / Org / Admin | Get ticket details and TicketCode GUID for QR code rendering |
-| `POST` | `/api/events/{id}/check-in` | Organizer / Admin | Check-in ticket with concurrency safety against double scans |
-| `GET` | `/api/events/{id}/stats` | Organizer / Admin | Attendance statistics with explicit SQL interval and daily velocity |
-| `GET` | `/api/events/{id}/attendees.csv` | Organizer / Admin | Export complete attendee roster with check-in records to CSV |
+| `GET` | `/health` | Public | Service health |
+| `POST` | `/api/auth/register` | Public | Register a new student; returns a JWT |
+| `POST` | `/api/auth/login` | Public | Log in; returns a JWT with the role claim |
+| `GET` | `/api/auth/me` | Authenticated | Current user profile |
+| `POST` | `/api/users/{id}/promote-organizer` | Admin | Promote a user to Organizer |
+| `GET` | `/api/events` | Public | Published events with search, date filter, "has spots", sorting and paging |
+| `GET` | `/api/events/{id}` | Public | Event details with confirmed count, waitlist count and spots left |
+| `GET` | `/api/events/mine` | Organizer, Admin | Events owned by the current user |
+| `POST` | `/api/events` | Organizer, Admin | Create an event (starts as Draft) |
+| `PUT` | `/api/events/{id}` | Organizer, Admin | Update an event and its capacity |
+| `DELETE` | `/api/events/{id}` | Organizer, Admin | Delete a draft event |
+| `POST` | `/api/events/{id}/publish` | Organizer, Admin | Publish a draft event |
+| `POST` | `/api/events/{id}/cancel` | Organizer, Admin | Cancel an event |
+| `POST` | `/api/events/{id}/register` | Authenticated | Register (confirmed ticket or next waitlist position) |
+| `DELETE` | `/api/events/{id}/register` | Authenticated | Cancel my registration; promotes the next waitlisted student |
+| `GET` | `/api/me/registrations` | Authenticated | My tickets and waitlist positions |
+| `GET` | `/api/events/{id}/registrations` | Organizer, Admin | Attendee roster with filters |
+| `GET` | `/api/registrations/{id}/ticket` | Owner, event organizer, Admin | Ticket data for the QR code |
+| `POST` | `/api/events/{id}/check-in` | Organizer, Admin | Check in a ticket code |
+| `GET` | `/api/events/{id}/stats` | Organizer, Admin | Attendance statistics |
+| `GET` | `/api/events/{id}/attendees.csv` | Organizer, Admin | Attendee export |
+| `POST` | `/api/demo/seed` | Public | Load sample data |
+
+Check-in responses: `200` on success, `409` if the ticket was already scanned (with the original time), `400` for a wrong-event, cancelled or waitlisted ticket, `404` for an unknown ticket code, and `403` if the scanner is not the event's organizer or an admin.
 
 ---
 
-## Concurrency Protection & Waitlist Architecture
+## Design Decisions
 
-1. **Row-Level Locking (`WITH (UPDLOCK, ROWLOCK)`)**: In SQL Server, the registration query locks the specific `Event` row within a transaction. Any concurrent registration attempt for the same event must wait, guaranteeing that the capacity evaluation (`confirmedCount < Capacity`) is serialized and race-free.
-2. **Keyed In-Memory Concurrency Semaphore**: Synchronizes concurrent registration calls per event in application memory, providing thread-safe concurrency guarantees in test environments (EF Core InMemory).
-3. **Database-Level Unique Constraint**: A `UNIQUE (EventId, UserId)` index guarantees that a student cannot register twice even under intense concurrent submission attempts.
-4. **Decoupled Event Publishing**: `IRegistrationEventPublisher` emits event notifications (`PublishTicketIssuedAsync`, `PublishWaitlistPromotedAsync`) outside the core transaction so email or background processing remains non-blocking.
+### Registration without overbooking
+When several students try to take the last spot at once, only one may succeed. Registration works in three layers:
+1. **Database lock.** On SQL Server, the event row is read inside a transaction with `WITH (UPDLOCK, ROWLOCK)`, so competing registrations for the same event wait their turn and the capacity check is safe.
+2. **Per-event semaphore.** An in-process lock keyed by event ID serializes registrations within an instance, which also makes the logic testable with the EF Core InMemory provider.
+3. **Unique constraint.** A unique `(EventId, UserId)` index rejects duplicate registrations even if a request slips past the application checks.
+
+A parallel test registers many students against a small event and checks that exactly the capacity number are confirmed.
+
+### Waitlist promotion
+Waitlisted registrations carry a sequential position. When a confirmed student cancels, the lowest position is promoted and the remaining positions are renumbered so the queue has no gaps. Raising an event's capacity promotes as many waitlisted students as there are new spots.
+
+### Queue-based email
+After a registration is confirmed, promoted or cancelled, the API publishes a message to the `registration-events` queue only after the database change is saved. If enqueueing fails, the error is logged and the registration still stands. The Functions app processes each message, checks that the registration is still in the expected state before sending (so retries don't send stale or duplicate emails), and relies on the queue's retry policy: after 5 failed attempts a message moves to the poison queue.
+
+### Reminders
+A timer function runs daily at 08:00 UTC and emails confirmed attendees of published events that start within the next 24 hours. It records `ReminderSentAt` so nobody gets a second reminder.
+
+### Safe check-in
+Check-in takes an in-process lock per event, so a double scan of the same QR code produces one success and one clear "already checked in" response.
+
+### Explicit SQL for statistics
+The statistics endpoint uses hand-written SQL on SQL Server:
+- Check-ins per 15-minute interval: `(DATEDIFF(minute, 0, CheckedInAt) / 15) * 15`, converted back with `DATEADD`, then grouped.
+- Sign-ups per day: `CAST(RegisteredAt AS DATE)` grouped with `COUNT(*)`.
+
+Tests run against an equivalent LINQ fallback because the InMemory provider can't run raw SQL. The no-show rate is the share of expected attendees (confirmed plus checked-in) who never checked in.
 
 ---
 
-## Authorization Policies
+## CI/CD and Deployment
 
-- **RequireAdmin**: User must have the `Admin` role. Can manage all events, registrations, and users.
-- **RequireOrganizer**: User must have either `Organizer` or `Admin` role. Can create and manage events.
-- **Student**: Default role upon registration. Can view published events, register, and check into events.
+### GitHub Actions
+
+- **`ci.yml`** builds and tests the backend (with coverage), then type-checks, tests and builds the frontend.
+- **`deploy.yml`** runs on pushes to `main`. After validation it applies EF Core migrations to Azure SQL using a migration bundle, deploys the API to Azure App Service, deploys the background jobs to an Azure Function App, and deploys the frontend to Azure Static Web Apps.
+
+### Azure resources
+
+Resource group, Azure SQL Database, Storage Account (with the `registration-events` queue), App Service (Linux, .NET 8), Function App (Consumption, .NET 8 isolated), Static Web App, Application Insights, and optionally Azure Communication Services for email. Step-by-step setup and cost-friendly tiers are in [docs/AZURE_DEPLOYMENT_GUIDE.md](docs/AZURE_DEPLOYMENT_GUIDE.md).
+
+### Required GitHub secrets
+
+| Secret | Used for |
+|---|---|
+| `AZURE_SQL_CONNECTION_STRING` | Applying migrations |
+| `AZURE_WEBAPP_NAME`, `AZURE_WEBAPP_PUBLISH_PROFILE` | Deploying the API |
+| `AZURE_FUNCTIONAPP_NAME`, `AZURE_FUNCTIONAPP_PUBLISH_PROFILE` | Deploying the background jobs |
+| `AZURE_STATIC_WEB_APPS_API_TOKEN` | Deploying the frontend |
+| `VITE_API_URL` | API URL baked into the frontend build |
 
 ---
 
-## Implemented Phases
-- [x] **Phase 1: Backend Foundation**
-  - Monorepo directory structure and solution setup
-  - Core domain model, entities, enums, and EF Core configurations
-  - Initial database migration (`InitialCreate`) with all indexes, constraints, and concurrency token
-  - Global RFC 7807 `ProblemDetails` exception handling middleware
-  - Swagger/OpenAPI with JWT Bearer scheme
-  - CORS for frontend dev server (`http://localhost:5173`)
-  - Health check endpoint (`/health`)
-  - Docker Compose for SQL Server and Azurite
-  - xUnit & FluentAssertions test suite
-- [x] **Phase 2: Authentication and Roles**
-  - BCrypt password hashing (`IPasswordHasher`, `BCryptPasswordHasher`)
-  - JWT token generation (`IJwtTokenGenerator`, `JwtTokenGenerator`) with configurable secret and expiry
-  - Current user accessor (`ICurrentUserService`, `CurrentUserService`) extracting claims via `IHttpContextAccessor`
-  - Auth endpoints: `POST /api/auth/register`, `POST /api/auth/login`, `GET /api/auth/me`
-  - Admin promotion endpoint: `POST /api/users/{id}/promote-organizer`
-  - FluentValidation for register and login requests
-  - Conflict handling (409 ProblemDetails) on duplicate email registration
-- [x] **Phase 3: Events API**
-  - Event CRUD and lifecycle operations (`Create`, `Update`, `Delete`, `Publish`, `Cancel`)
-  - Ownership enforcement: Organizers may only manage their own events; Admins can manage all
-  - State machine restrictions: Only `Draft` events can be deleted or published; completed/cancelled events cannot be modified
-  - Capacity rules: Enforced `Capacity > 0`; capacity can be increased post-publish, but cannot be reduced below confirmed registrations
-  - Public events feed with title search, date range filters, "has spots" filter, dynamic sorting, and pagination
-  - Public event details with real-time `confirmedCount`, `waitlistCount`, `spotsLeft`, and `isSoldOut` calculations
-- [x] **Phase 4: Registration, Waitlist and Concurrency**
-  - Concurrency-safe event registration (`POST /api/events/{id}/register`)
-  - Automatic waitlist placement with sequential position numbering when capacity is exhausted
-  - Spot vacancy auto-promotion: cancelling a confirmed registration automatically promotes the lowest waitlist position in the same transaction
-  - Capacity expansion promotion: raising event capacity automatically promotes waitlisted students for all new spots
-  - Sequential waitlist renumbering on cancellations and promotions (no queue gaps)
-  - Decoupled `IRegistrationEventPublisher` for asynchronous notification delivery
-  - Student registration management (`GET /api/me/registrations`, `DELETE /api/events/{id}/register`)
-  - Organizer attendee roster query with filters (`GET /api/events/{id}/registrations`)
-  - 63 unit, integration, and parallel concurrency tests passing
-- [x] **Phase 5: Asynchronous Processing with Azure Queue Storage and Azure Functions**
-  - Azure Storage Queue event publisher (`AzureQueueRegistrationEventPublisher`) with non-fatal logging failure handling
-  - `Eventloop.Functions` isolated worker process with Queue and Timer triggers
-  - Queue trigger function (`ProcessRegistrationEvent`) listening on `registration-events` queue
-  - HTML email generation and delivery for ticket confirmations, waitlist promotions, and cancellations
-  - Idempotent processing and poison queue retry configuration (`maxDequeueCount: 5`)
-  - Timer trigger function (`DailyEventReminder`) running daily at 08:00 UTC sending 24-hour event reminders
-  - Added `ReminderSentAt` migration to track delivered reminders and eliminate duplicate notifications
-  - Configurable `IEmailSender` with `ConsoleEmailSender` (local dev) and `AzureCommunicationServicesEmailSender` (production)
-  - 70 unit and integration tests passing across all components
-- [x] **Phase 6: Tickets, Check-In and Attendance Statistics**
-  - Secure ticket data endpoint (`GET /api/registrations/{id}/ticket`) for attendee QR rendering with ticket code GUID
-  - Concurrency-safe door check-in endpoint (`POST /api/events/{id}/check-in`) with keyed semaphore locks protecting against rapid double-scans
-  - Strict check-in validation returning explicit RFC 7807 responses:
-    - `200 OK` on successful scan with attendee name, check-in timestamp, and scanner ID
-    - `409 Conflict` on already checked-in tickets indicating original check-in time and scanner
-    - `400 Bad Request` on wrong-event, cancelled, or waitlisted registrations
-    - `404 Not Found` on non-existent ticket codes
-    - `403 Forbidden` on unauthorized scanner attempts (only event organizer or Admin permitted)
-  - Hand-written SQL attendance statistics (`GET /api/events/{id}/stats`):
-    - Confirmed, checked-in, waitlisted, and cancelled metrics
-    - No-show rate calculation: `(Confirmed / (Confirmed + CheckedIn)) * 100`
-    - Check-in velocity: 15-minute interval bucketing using `(DATEDIFF(minute, 0, CheckedInAt) / 15) * 15`
-    - Registration velocity: daily signups using `CAST(RegisteredAt AS DATE)`
-    - High-performance InMemory test aggregation fallback for rapid test isolation
-  - Organizer attendee CSV export (`GET /api/events/{id}/attendees.csv`) with full formatting, status sorting, and delimiter escaping
-  - 92 unit and integration tests passing across all components
-- [x] **Phase 7: Frontend (React + TypeScript + Vite + Tailwind CSS)**
-  - Responsive, modern UI using clean neutral palette (`slate-50` to `slate-900`), single accent color (`indigo`/`brand`), rounded cards, and consistent spacing
-  - **Student Experience**:
-    - Authentication: Login & Register pages with client validation, error banners, and 409 conflict handling
-    - Events Feed: Search by title, date range filters, available spots filter, spots badge ("X spots available" / "Full - join waitlist")
-    - Event Details: Rich event overview, capacity tracking, current registration status, and automated waitlist promotion info
-    - `RegisterButton`: Intelligent state management handling unauthenticated, available, full/waitlist, confirmed, and waitlisted states
-    - My Tickets: Attendee pass roster, live waitlist queue numbers, and ticket pass modal with large `qrcode.react` QR codes and manual GUID copying
-  - **Organizer Experience**:
-    - Organizer Dashboard: Event CRUD with create/edit modal forms, one-click event publishing, and event cancellation with confirmation dialogs
-    - Event Management Portal with tabbed layout:
-      - **Attendees Tab**: Filterable attendee roster (All, Confirmed, CheckedIn, Waitlisted, Cancelled), attendee search, and one-click CSV export
-      - **Check-In Tab**: Live camera QR scanner via `html5-qrcode` + manual GUID input fallback, clear result panel (green verified admission banner / red duplicate & error banner), and recent session scans history
-      - **Analytics Tab**: Recharts data visualizations for daily signups velocity and 15-minute door check-in intervals, plus KPI summary tiles (Capacity, Confirmed, Checked In, Waitlist, No-Show Rate)
-  - **Architecture & Technical Infrastructure**:
-    - Feature-based folder structure (`features/auth`, `features/events`, `features/tickets`, `features/organizer`)
-    - Typed API client with automatic JWT token attachment, RFC 7807 ProblemDetails parsing, and 401 redirect to login
-    - TanStack Query (`@tanstack/react-query`) for cache synchronization and automatic mutation invalidation
-    - Role-based route guards (`ProtectedRoute`) protecting student, organizer, and admin paths
-    - Reusable UI component library: Button, Input, Modal, Badge, Skeleton loaders, Empty states, and Toast notifications
-  - 9 Vitest & React Testing Library tests passing covering register button state transitions and check-in result panel states
-- [x] **Phase 8: Quality, Deployment and Polish**
-  - **Automated CI/CD**:
-    - `.github/workflows/ci.yml`: Multi-stage build, backend xUnit test run with Cobertura code coverage, frontend TypeScript checking (`tsc --noEmit`), Vitest test execution, and production Vite asset bundle build
-    - `.github/workflows/deploy.yml`: Automated EF Core migration bundle generation (`dotnet ef migrations bundle`) safely applied to Azure SQL, Azure App Service API deployment (`azure/webapps-deploy@v3`), Azure Functions worker deployment (`Azure/functions-action@v1`), and Azure Static Web Apps frontend deployment (`Azure/static-web-apps-deploy@v1`)
-  - **Production Observability & Telemetry**:
-    - Integrated Application Insights in ASP.NET Core API via `Microsoft.ApplicationInsights.AspNetCore`
-    - Integrated Application Insights in Azure Functions Isolated Worker via `Microsoft.Azure.Functions.Worker.ApplicationInsights` and `ConfigureFunctionsApplicationInsights()`
-  - **Cloud Infrastructure & Production Guide**:
-    - Created comprehensive [Azure Deployment Guide](docs/AZURE_DEPLOYMENT_GUIDE.md) detailing resource setup, cost-conscious tiers (Free & Serverless), connection string mapping, and GitHub Secrets reference
-    - Zero hard-coded secrets; production configuration loaded strictly via App Settings / Environment Variables (`appsettings.Production.json`)
-    - Dynamic CORS configuration powered by `Cors:AllowedOrigins` app settings
-  - **Demo Data Seeding for Reviewers**:
-    - Implemented `DemoDataSeeder` generating realistic college clubs, draft/active/full/checked-in events, waitlisted queues, and attendee scan histories
-    - Three easy execution options: `--seed` CLI command flag, `POST /api/demo/seed` REST endpoint, and 1-click UI reset button with 1-click autofill buttons for Admin, Organizer, and Student roles on the Login page
-  - **Code Quality & Architecture Audit**:
-    - Verified database indexes (composite unique on `(EventId, UserId)`, index on `TicketCode`, index on `(EventId, Status)`)
-    - Audited query execution paths ensuring zero N+1 queries across event and registration endpoints
-    - Verified 94 backend xUnit tests and 9 frontend Vitest tests all passing smoothly
+## License
+
+Released under the MIT License.
