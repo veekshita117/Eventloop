@@ -120,9 +120,9 @@ The web application will open on [http://localhost:5173](http://localhost:5173) 
 
 ### Step 7: Run Automated Tests
 
-**Backend xUnit Test Suite**:
+**Backend xUnit Test Suite & Code Coverage**:
 ```bash
-dotnet test backend/Eventloop.Tests/Eventloop.Tests.csproj
+dotnet test backend/Eventloop.Tests/Eventloop.Tests.csproj --collect:"XPlat Code Coverage"
 ```
 
 **Frontend Vitest Suite**:
@@ -130,6 +130,33 @@ dotnet test backend/Eventloop.Tests/Eventloop.Tests.csproj
 cd frontend
 npm test
 ```
+
+---
+
+### Step 8: Demo Data Seeding (Reviewer Quick-Start)
+
+Eventloop includes a rich demo data seeder that provisions realistic sample data:
+- **Users**: Admin (`admin@eventloop.edu`), Organizers (`robotics@eventloop.edu`, `acm@eventloop.edu`), and 7 Students (Alice, Bob, Charlie, etc.). Password for all: `Password123!`.
+- **Events & State**:
+  - Full Event with Waitlist: *AI & Robotics Workshop* (Capacity 3, 3 Confirmed, 2 Waitlisted students).
+  - Live Event with Door Scans: *Annual Hackathon 2026* (Capacity 10, 4 CheckedIn across distinct 15-min intervals, 2 Confirmed no-shows, 1 Cancelled).
+  - Open Registration Event: *Spring Tech Symposium* (Capacity 150, 138 spots open).
+  - Draft Event: *Club Executive Board Meeting* (Draft status).
+
+To seed data:
+- **Via CLI flag**: `dotnet run --project backend/Eventloop.Api -- --seed`
+- **Via REST endpoint**: `POST http://localhost:5000/api/demo/seed`
+- **Via Web UI**: Click the **"Reset / Seed Demo DB"** button on the Login page (`http://localhost:5173/login`), or click any quick-login reviewer badge to auto-fill credentials.
+
+---
+
+## Deployment & Cloud Architecture
+
+See the detailed **[Azure Deployment Guide](docs/AZURE_DEPLOYMENT_GUIDE.md)** for step-by-step Azure portal setup, GitHub Actions secret configuration, and cost-effective provisioning (Free & Basic tiers).
+
+- **CI Workflow**: `.github/workflows/ci.yml` builds, tests (xUnit + Vitest), verifies TypeScript compilation, and collects backend coverage on every PR and push.
+- **CD Workflow**: `.github/workflows/deploy.yml` bundles and applies EF Core migrations to Azure SQL, deploys the Web API to Azure App Service, deploys background jobs to Azure Functions, and deploys the frontend to Azure Static Web Apps.
+- **Telemetry**: Full Application Insights telemetry enabled across both Web API (`Microsoft.ApplicationInsights.AspNetCore`) and Azure Functions (`Microsoft.Azure.Functions.Worker.ApplicationInsights`).
 
 ---
 
@@ -271,3 +298,21 @@ npm test
     - Role-based route guards (`ProtectedRoute`) protecting student, organizer, and admin paths
     - Reusable UI component library: Button, Input, Modal, Badge, Skeleton loaders, Empty states, and Toast notifications
   - 9 Vitest & React Testing Library tests passing covering register button state transitions and check-in result panel states
+- [x] **Phase 8: Quality, Deployment and Polish**
+  - **Automated CI/CD**:
+    - `.github/workflows/ci.yml`: Multi-stage build, backend xUnit test run with Cobertura code coverage, frontend TypeScript checking (`tsc --noEmit`), Vitest test execution, and production Vite asset bundle build
+    - `.github/workflows/deploy.yml`: Automated EF Core migration bundle generation (`dotnet ef migrations bundle`) safely applied to Azure SQL, Azure App Service API deployment (`azure/webapps-deploy@v3`), Azure Functions worker deployment (`Azure/functions-action@v1`), and Azure Static Web Apps frontend deployment (`Azure/static-web-apps-deploy@v1`)
+  - **Production Observability & Telemetry**:
+    - Integrated Application Insights in ASP.NET Core API via `Microsoft.ApplicationInsights.AspNetCore`
+    - Integrated Application Insights in Azure Functions Isolated Worker via `Microsoft.Azure.Functions.Worker.ApplicationInsights` and `ConfigureFunctionsApplicationInsights()`
+  - **Cloud Infrastructure & Production Guide**:
+    - Created comprehensive [Azure Deployment Guide](docs/AZURE_DEPLOYMENT_GUIDE.md) detailing resource setup, cost-conscious tiers (Free & Serverless), connection string mapping, and GitHub Secrets reference
+    - Zero hard-coded secrets; production configuration loaded strictly via App Settings / Environment Variables (`appsettings.Production.json`)
+    - Dynamic CORS configuration powered by `Cors:AllowedOrigins` app settings
+  - **Demo Data Seeding for Reviewers**:
+    - Implemented `DemoDataSeeder` generating realistic college clubs, draft/active/full/checked-in events, waitlisted queues, and attendee scan histories
+    - Three easy execution options: `--seed` CLI command flag, `POST /api/demo/seed` REST endpoint, and 1-click UI reset button with 1-click autofill buttons for Admin, Organizer, and Student roles on the Login page
+  - **Code Quality & Architecture Audit**:
+    - Verified database indexes (composite unique on `(EventId, UserId)`, index on `TicketCode`, index on `(EventId, Status)`)
+    - Audited query execution paths ensuring zero N+1 queries across event and registration endpoints
+    - Verified 94 backend xUnit tests and 9 frontend Vitest tests all passing smoothly

@@ -1,0 +1,129 @@
+name: Continuous Deployment
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+concurrency:
+  group: production-deployment
+  cancel-in-progress: false
+
+jobs:
+  ci-check:
+    name: Run CI Validation
+    uses: ./.github/workflows/ci.yml
+
+  deploy-database:
+    name: Apply EF Core Migrations (Azure SQL)
+    needs: ci-check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup .NET SDK 8.0
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Install dotnet-ef Tool
+        run: dotnet tool install --global dotnet-ef
+
+      - name: Generate Idempotent Migration Bundle
+        run: >
+          dotnet ef migrations bundle
+          --project backend/Eventloop.Infrastructure/Eventloop.Infrastructure.csproj
+          --startup-project backend/Eventloop.Api/Eventloop.Api.csproj
+          --output ./efbundle
+          --verbose
+
+      - name: Execute Migration Bundle Against Azure SQL
+        run: ./efbundle --connection "${{ secrets.AZURE_SQL_CONNECTION_STRING }}"
+
+  deploy-api:
+    name: Deploy API (Azure App Service)
+    needs: deploy-database
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup .NET SDK 8.0
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Publish API Project
+        run: >
+          dotnet publish backend/Eventloop.Api/Eventloop.Api.csproj
+          -c Release
+          -o ./publish-api
+
+      - name: Deploy to Azure App Service
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ secrets.AZURE_WEBAPP_NAME }}
+          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+          package: ./publish-api
+
+  deploy-functions:
+    name: Deploy Background Jobs (Azure Functions)
+    needs: deploy-database
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup .NET SDK 8.0
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Publish Functions Project
+        run: >
+          dotnet publish backend/Eventloop.Functions/Eventloop.Functions.csproj
+          -c Release
+          -o ./publish-functions
+
+      - name: Deploy to Azure Function App
+        uses: Azure/functions-action@v1
+        with:
+          app-name: ${{ secrets.AZURE_FUNCTIONAPP_NAME }}
+          publish-profile: ${{ secrets.AZURE_FUNCTIONAPP_PUBLISH_PROFILE }}
+          package: ./publish-functions
+
+  deploy-frontend:
+    name: Deploy Frontend (Azure Static Web Apps)
+    needs: ci-check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: './frontend/package-lock.json'
+
+      - name: Install Dependencies
+        working-directory: ./frontend
+        run: npm ci
+
+      - name: Build Frontend Production Assets
+        working-directory: ./frontend
+        env:
+          VITE_API_URL: ${{ secrets.VITE_API_URL }}
+        run: npm run build
+
+      - name: Deploy to Azure Static Web Apps
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          action: 'upload'
+          app_location: './frontend'
+          output_location: 'dist'
+          skip_app_build: true

@@ -27,4 +27,10 @@ export const authApi = {
       method: 'POST',
     });
   },
+
+  seedDemoData: async (): Promise<any> => {
+    return apiClient<any>('/api/demo/seed', {
+      method: 'POST',
+    });
+  },
 };

@@ -2,6 +2,7 @@ using Eventloop.Core.Interfaces;
 using Eventloop.Infrastructure.Data;
 using Eventloop.Infrastructure.Email;
 using Eventloop.Infrastructure.Services;
+using Microsoft.Azure.Functions.Worker;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -12,6 +13,10 @@ var host = new HostBuilder()
     .ConfigureServices((context, services) =>
     {
         var config = context.Configuration;
+
+        // Application Insights telemetry for Azure Functions isolated worker
+        services.AddApplicationInsightsTelemetryWorkerService();
+        services.ConfigureFunctionsApplicationInsights();
 
         // Database context
         var connectionString = config.GetConnectionString("DefaultConnection")

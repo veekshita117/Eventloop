@@ -10,9 +10,13 @@ obj/
 .idea/
 
 ## User Secrets & Local Config
-appsettings.Production.json
 *.local.json
 secrets.json
+
+## Test Results & Coverage
+TestResults/
+coverage/
+*.cobertura.xml
 
 ## NuGet & Local Tooling
 *.nupkg

@@ -5,12 +5,13 @@ import { useAuth } from '../../context/AuthContext';
 import { Input } from '../../components/common/Input';
 import { Button } from '../../components/common/Button';
 import { useToast } from '../../context/ToastContext';
+import { authApi } from '../../api/auth';
 
 export const LoginPage: React.FC = () => {
   const { login } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { success } = useToast();
+  const { success, error: toastError } = useToast();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -111,6 +112,73 @@ export const LoginPage: React.FC = () => {
 
           <div className="mt-6 pt-6 border-t border-slate-100 text-center text-xs text-slate-500">
             <span>Organizer or Admin? Sign in with your registered credentials to access your dashboard.</span>
+          </div>
+
+          {/* Quick Demo Data & Autofill Helper */}
+          <div className="mt-6 pt-6 border-t border-slate-100 space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold uppercase tracking-wider text-brand-700">Reviewer Demo Accounts</span>
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    await authApi.seedDemoData();
+                    success('Demo data seeded! Organizers, students, waitlists & check-ins ready.');
+                  } catch (err: any) {
+                    toastError(err.message || 'Seeding failed');
+                  }
+                }}
+                className="text-[11px] font-semibold text-brand-600 hover:text-brand-800 underline"
+              >
+                Reset / Seed Demo DB
+              </button>
+            </div>
+            <div className="grid grid-cols-2 gap-2 text-[11px]">
+              <button
+                type="button"
+                onClick={() => {
+                  setEmail('admin@eventloop.edu');
+                  setPassword('Admin@123');
+                }}
+                className="p-2 rounded-lg bg-slate-50 hover:bg-slate-100 border border-slate-200 text-left font-medium text-slate-700 transition-colors"
+              >
+                <strong className="block text-slate-900">Admin</strong>
+                admin@eventloop.edu
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setEmail('robotics@eventloop.edu');
+                  setPassword('Organizer@123');
+                }}
+                className="p-2 rounded-lg bg-slate-50 hover:bg-slate-100 border border-slate-200 text-left font-medium text-slate-700 transition-colors"
+              >
+                <strong className="block text-slate-900">Organizer (Robotics)</strong>
+                robotics@eventloop.edu
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setEmail('alice@eventloop.edu');
+                  setPassword('Student@123');
+                }}
+                className="p-2 rounded-lg bg-slate-50 hover:bg-slate-100 border border-slate-200 text-left font-medium text-slate-700 transition-colors"
+              >
+                <strong className="block text-slate-900">Student (Alice - Ticket)</strong>
+                alice@eventloop.edu
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setEmail('diana@eventloop.edu');
+                  setPassword('Student@123');
+                }}
+                className="p-2 rounded-lg bg-slate-50 hover:bg-slate-100 border border-slate-200 text-left font-medium text-slate-700 transition-colors"
+              >
+                <strong className="block text-slate-900">Student (Diana - Waitlist #1)</strong>
+                diana@eventloop.edu
+              </button>
+            </div>
           </div>
         </div>
       </div>

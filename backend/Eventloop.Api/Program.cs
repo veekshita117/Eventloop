@@ -22,6 +22,7 @@ builder.Services.AddValidatorsFromAssemblyContaining<RegisterRequestValidator>()
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddHealthChecks();
 builder.Services.AddHttpContextAccessor();
+builder.Services.AddApplicationInsightsTelemetry();
 
 // Database context
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
@@ -52,6 +53,7 @@ builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<IRegistrationService, RegistrationService>();
 builder.Services.AddScoped<IEventService, EventService>();
 builder.Services.AddScoped<ICheckInService, CheckInService>();
+builder.Services.AddScoped<IDemoDataSeeder, DemoDataSeeder>();
 
 // JWT Configuration
 builder.Services.Configure<JwtSettings>(builder.Configuration.GetSection(JwtSettings.SectionName));
@@ -92,15 +94,17 @@ builder.Services.AddAuthorization(options =>
         policy.RequireRole(UserRole.Organizer.ToString(), UserRole.Admin.ToString()));
 });
 
-// CORS for React frontend (Vite dev server default: http://localhost:5173)
+// CORS for React frontend (Vite dev server default: http://localhost:5173 + Configurable for Production)
+var configuredOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>();
+var allowedOrigins = configuredOrigins != null && configuredOrigins.Length > 0
+    ? configuredOrigins
+    : new[] { "http://localhost:5173", "http://localhost:3000" };
+
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("FrontendDev", policy =>
     {
-        policy.WithOrigins(
-                "http://localhost:5173",
-                "http://localhost:3000"
-            )
+        policy.WithOrigins(allowedOrigins)
             .AllowAnyHeader()
             .AllowAnyMethod()
             .AllowCredentials();
@@ -143,6 +147,14 @@ builder.Services.AddSwaggerGen(c =>
 });
 
 var app = builder.Build();
+
+// Run database seeder if invoked with --seed flag
+if (args.Contains("--seed"))
+{
+    using var scope = app.Services.CreateScope();
+    var seeder = scope.ServiceProvider.GetRequiredService<IDemoDataSeeder>();
+    await seeder.SeedAsync();
+}
 
 // Global Exception Handler
 app.UseMiddleware<ExceptionHandlingMiddleware>();
