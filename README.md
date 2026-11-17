@@ -105,11 +105,30 @@ dotnet run --project backend/Eventloop.Functions/Eventloop.Functions.csproj
 
 ---
 
-### Step 6: Run Automated Tests
-Execute backend unit, integration, and concurrency tests:
+### Step 6: Run the Frontend (React + Vite + Tailwind)
+In a separate terminal window, install dependencies and start the Vite development server:
 
 ```bash
+cd frontend
+npm install
+npm run dev
+```
+
+The web application will open on [http://localhost:5173](http://localhost:5173) and proxy all `/api` requests to the ASP.NET Core backend on `http://localhost:5000`.
+
+---
+
+### Step 7: Run Automated Tests
+
+**Backend xUnit Test Suite**:
+```bash
 dotnet test backend/Eventloop.Tests/Eventloop.Tests.csproj
+```
+
+**Frontend Vitest Suite**:
+```bash
+cd frontend
+npm test
 ```
 
 ---
@@ -231,3 +250,24 @@ dotnet test backend/Eventloop.Tests/Eventloop.Tests.csproj
     - High-performance InMemory test aggregation fallback for rapid test isolation
   - Organizer attendee CSV export (`GET /api/events/{id}/attendees.csv`) with full formatting, status sorting, and delimiter escaping
   - 92 unit and integration tests passing across all components
+- [x] **Phase 7: Frontend (React + TypeScript + Vite + Tailwind CSS)**
+  - Responsive, modern UI using clean neutral palette (`slate-50` to `slate-900`), single accent color (`indigo`/`brand`), rounded cards, and consistent spacing
+  - **Student Experience**:
+    - Authentication: Login & Register pages with client validation, error banners, and 409 conflict handling
+    - Events Feed: Search by title, date range filters, available spots filter, spots badge ("X spots available" / "Full - join waitlist")
+    - Event Details: Rich event overview, capacity tracking, current registration status, and automated waitlist promotion info
+    - `RegisterButton`: Intelligent state management handling unauthenticated, available, full/waitlist, confirmed, and waitlisted states
+    - My Tickets: Attendee pass roster, live waitlist queue numbers, and ticket pass modal with large `qrcode.react` QR codes and manual GUID copying
+  - **Organizer Experience**:
+    - Organizer Dashboard: Event CRUD with create/edit modal forms, one-click event publishing, and event cancellation with confirmation dialogs
+    - Event Management Portal with tabbed layout:
+      - **Attendees Tab**: Filterable attendee roster (All, Confirmed, CheckedIn, Waitlisted, Cancelled), attendee search, and one-click CSV export
+      - **Check-In Tab**: Live camera QR scanner via `html5-qrcode` + manual GUID input fallback, clear result panel (green verified admission banner / red duplicate & error banner), and recent session scans history
+      - **Analytics Tab**: Recharts data visualizations for daily signups velocity and 15-minute door check-in intervals, plus KPI summary tiles (Capacity, Confirmed, Checked In, Waitlist, No-Show Rate)
+  - **Architecture & Technical Infrastructure**:
+    - Feature-based folder structure (`features/auth`, `features/events`, `features/tickets`, `features/organizer`)
+    - Typed API client with automatic JWT token attachment, RFC 7807 ProblemDetails parsing, and 401 redirect to login
+    - TanStack Query (`@tanstack/react-query`) for cache synchronization and automatic mutation invalidation
+    - Role-based route guards (`ProtectedRoute`) protecting student, organizer, and admin paths
+    - Reusable UI component library: Button, Input, Modal, Badge, Skeleton loaders, Empty states, and Toast notifications
+  - 9 Vitest & React Testing Library tests passing covering register button state transitions and check-in result panel states

@@ -282,6 +282,35 @@ public class EventService : IEventService
         return new PagedResultDto<EventResponseDto>(items, totalCount, query.Page, query.PageSize);
     }
 
+    public async Task<IReadOnlyList<EventResponseDto>> GetMyEventsAsync(
+        Guid currentUserId,
+        bool isAdmin,
+        CancellationToken cancellationToken = default)
+    {
+        var queryable = _context.Events
+            .AsNoTracking()
+            .Include(e => e.Organizer)
+            .AsQueryable();
+
+        if (!isAdmin)
+        {
+            queryable = queryable.Where(e => e.OrganizerId == currentUserId);
+        }
+
+        var events = await queryable
+            .OrderByDescending(e => e.CreatedAt)
+            .Select(e => new
+            {
+                Event = e,
+                OrganizerName = e.Organizer.Name,
+                ConfirmedCount = e.Registrations.Count(r => r.Status == RegistrationStatus.Confirmed || r.Status == RegistrationStatus.CheckedIn),
+                WaitlistCount = e.Registrations.Count(r => r.Status == RegistrationStatus.Waitlisted)
+            })
+            .ToListAsync(cancellationToken);
+
+        return events.Select(x => MapToEventResponseDto(x.Event, x.OrganizerName, x.ConfirmedCount, x.WaitlistCount)).ToList();
+    }
+
     private static void ValidateOwnership(Event eventEntity, Guid currentUserId, bool isAdmin)
     {
         if (!isAdmin && eventEntity.OrganizerId != currentUserId)

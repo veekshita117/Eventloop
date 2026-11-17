@@ -49,6 +49,18 @@ public class EventsController : ControllerBase
     }
 
     [Authorize(Policy = "RequireOrganizer")]
+    [HttpGet("mine")]
+    [ProducesResponseType(typeof(IReadOnlyList<EventResponseDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetMyEvents(CancellationToken cancellationToken)
+    {
+        var currentUserId = _currentUserService.UserId!.Value;
+        var isAdmin = _currentUserService.IsInRole(UserRole.Admin);
+
+        var result = await _eventService.GetMyEventsAsync(currentUserId, isAdmin, cancellationToken);
+        return Ok(result);
+    }
+
+    [Authorize(Policy = "RequireOrganizer")]
     [HttpPost]
     [ProducesResponseType(typeof(EventResponseDto), StatusCodes.Status201Created)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
