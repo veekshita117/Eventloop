@@ -50,3 +50,25 @@ pnpm-debug.log*
 *.log
 .DS_Store
 Thumbs.db
+
+# Local .NET files
+.dotnet_home/
+**/bin/
+**/obj/
+
+# Frontend generated files
+**/node_modules/
+**/dist/
+
+# Environment files and secrets
+.env
+.env.*
+!.env.example
+
+# Logs and temporary files
+*.log
+*.tmp
+
+# IDE files
+.vs/
+.idea/
