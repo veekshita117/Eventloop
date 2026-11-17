@@ -109,7 +109,7 @@ dotnet test backend/Eventloop.Tests/Eventloop.Tests.csproj
 
 ---
 
-## API Endpoints (Phase 1 & 2)
+## API Endpoints (Phase 1, 2 & 3)
 
 | Method | Endpoint | Access | Description |
 |---|---|---|---|
@@ -118,6 +118,13 @@ dotnet test backend/Eventloop.Tests/Eventloop.Tests.csproj
 | `POST` | `/api/auth/login` | Public | Authenticate user; returns JWT with role claim |
 | `GET` | `/api/auth/me` | Authenticated | Retrieve current user profile from JWT claims |
 | `POST` | `/api/users/{id}/promote-organizer` | Admin | Promote a user to Organizer role |
+| `GET` | `/api/events` | Public | List published events with search, date filters, "has spots", sorting & pagination |
+| `GET` | `/api/events/{id}` | Public | Event details with confirmed count, waitlist count, and spots left |
+| `POST` | `/api/events` | Organizer / Admin | Create a new event (starts as Draft) |
+| `PUT` | `/api/events/{id}` | Organizer / Admin | Update event details & capacity (validates ownership & capacity constraints) |
+| `DELETE` | `/api/events/{id}` | Organizer / Admin | Delete event (Draft only; validates ownership) |
+| `POST` | `/api/events/{id}/publish` | Organizer / Admin | Publish draft event (validates ownership) |
+| `POST` | `/api/events/{id}/cancel` | Organizer / Admin | Cancel event (validates ownership) |
 
 ---
 
@@ -148,4 +155,12 @@ dotnet test backend/Eventloop.Tests/Eventloop.Tests.csproj
   - Admin promotion endpoint: `POST /api/users/{id}/promote-organizer`
   - FluentValidation for register and login requests
   - Conflict handling (409 ProblemDetails) on duplicate email registration
-  - 27 unit & controller tests covering auth flow, password verification, duplicate handling, and authorization policies
+- [x] **Phase 3: Events API**
+  - Event CRUD and lifecycle operations (`Create`, `Update`, `Delete`, `Publish`, `Cancel`)
+  - Ownership enforcement: Organizers may only manage their own events; Admins can manage all
+  - State machine restrictions: Only `Draft` events can be deleted or published; completed/cancelled events cannot be modified
+  - Capacity rules: Enforced `Capacity > 0`; capacity can be increased post-publish, but cannot be reduced below confirmed registrations
+  - TODO hook for waitlist auto-promotion upon capacity increase (Phase 4 integration)
+  - Public events feed with title search, date range filters, "has spots" filter, dynamic sorting, and pagination
+  - Public event details with real-time `confirmedCount`, `waitlistCount`, `spotsLeft`, and `isSoldOut` calculations
+  - 52 unit, validation, service, and controller tests passing

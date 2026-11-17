@@ -42,6 +42,7 @@ public class ExceptionHandlingMiddleware
         var (statusCode, title) = exception switch
         {
             ConflictException => (HttpStatusCode.Conflict, "Conflict"),
+            ForbiddenException => (HttpStatusCode.Forbidden, "Forbidden"),
             UnauthorizedException => (HttpStatusCode.Unauthorized, "Unauthorized"),
             NotFoundException or KeyNotFoundException => (HttpStatusCode.NotFound, "Resource not found"),
             ValidationException or ArgumentException or InvalidOperationException => (HttpStatusCode.BadRequest, "Bad request"),
