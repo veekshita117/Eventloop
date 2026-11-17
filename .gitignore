@@ -1,0 +1,48 @@
+## .NET / C#
+bin/
+obj/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+.vs/
+.vscode/
+.idea/
+
+## User Secrets & Local Config
+appsettings.Production.json
+*.local.json
+secrets.json
+
+## NuGet & Local Tooling
+*.nupkg
+packages/
+.dotnet_home/
+.nuget/
+
+## Azure Functions & Azurite
+.azurefunctions/
+bin/
+obj/
+local.settings.json
+__blobstorage__/
+__queuestorage__/
+__tablestorage__/
+azurite/
+
+## Frontend / Node
+node_modules/
+dist/
+dist-ssr/
+*.local
+.env
+.env.*.local
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+## OS / Misc
+*.log
+.DS_Store
+Thumbs.db

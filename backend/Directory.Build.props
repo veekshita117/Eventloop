@@ -1,0 +1,7 @@
+<Project>
+  <PropertyGroup>
+    <UseSharedCompilation>false</UseSharedCompilation>
+    <ServerGarbageCollection>false</ServerGarbageCollection>
+    <RollForward>LatestMajor</RollForward>
+  </PropertyGroup>
+</Project>
