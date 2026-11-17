@@ -90,8 +90,23 @@ The API will listen on `http://localhost:5000` (or `https://localhost:5001`).
 
 ---
 
-### Step 5: Run Automated Tests
-Execute backend unit and integration tests:
+### Step 5: Run the Azure Functions Worker (Background Jobs)
+In a separate terminal window, start the isolated worker Functions app (reads from Azurite queue):
+
+```bash
+cd backend/Eventloop.Functions
+func start
+# OR using dotnet:
+dotnet run --project backend/Eventloop.Functions/Eventloop.Functions.csproj
+```
+
+- **Queue Trigger**: Watches queue `registration-events` and dispatches confirmation/waitlist/cancellation emails.
+- **Timer Trigger**: Runs daily at 08:00 UTC to queue 24-hour event reminders.
+
+---
+
+### Step 6: Run Automated Tests
+Execute backend unit, integration, and concurrency tests:
 
 ```bash
 dotnet test backend/Eventloop.Tests/Eventloop.Tests.csproj
@@ -105,7 +120,7 @@ dotnet test backend/Eventloop.Tests/Eventloop.Tests.csproj
 |---|---|---|
 | **Users** | `Id`, `Name`, `Email`, `PasswordHash`, `Role`, `CreatedAt` | Unique index on `Email`; enum conversion for `Role` (`Student`, `Organizer`, `Admin`). |
 | **Events** | `Id`, `OrganizerId`, `Title`, `Description`, `Venue`, `StartTime`, `EndTime`, `Capacity`, `Status`, `CreatedAt`, `RowVersion` | Check constraint `Capacity > 0`; `RowVersion` byte array mapped to `rowversion` for optimistic concurrency; index on `OrganizerId`. |
-| **Registrations** | `Id`, `EventId`, `UserId`, `Status`, `WaitlistPosition`, `TicketCode`, `RegisteredAt`, `CheckedInAt`, `CheckedInBy` | Unique composite constraint on `(EventId, UserId)`; unique index on `TicketCode`; composite index on `(EventId, Status)`. |
+| **Registrations** | `Id`, `EventId`, `UserId`, `Status`, `WaitlistPosition`, `TicketCode`, `RegisteredAt`, `CheckedInAt`, `CheckedInBy`, `ReminderSentAt` | Unique composite constraint on `(EventId, UserId)`; unique index on `TicketCode`; composite index on `(EventId, Status)`. Nullable `ReminderSentAt` ensures single 24-hour reminder delivery. |
 
 ---
 
@@ -185,3 +200,13 @@ dotnet test backend/Eventloop.Tests/Eventloop.Tests.csproj
   - Student registration management (`GET /api/me/registrations`, `DELETE /api/events/{id}/register`)
   - Organizer attendee roster query with filters (`GET /api/events/{id}/registrations`)
   - 63 unit, integration, and parallel concurrency tests passing
+- [x] **Phase 5: Asynchronous Processing with Azure Queue Storage and Azure Functions**
+  - Azure Storage Queue event publisher (`AzureQueueRegistrationEventPublisher`) with non-fatal logging failure handling
+  - `Eventloop.Functions` isolated worker process with Queue and Timer triggers
+  - Queue trigger function (`ProcessRegistrationEvent`) listening on `registration-events` queue
+  - HTML email generation and delivery for ticket confirmations, waitlist promotions, and cancellations
+  - Idempotent processing and poison queue retry configuration (`maxDequeueCount: 5`)
+  - Timer trigger function (`DailyEventReminder`) running daily at 08:00 UTC sending 24-hour event reminders
+  - Added `ReminderSentAt` migration to track delivered reminders and eliminate duplicate notifications
+  - Configurable `IEmailSender` with `ConsoleEmailSender` (local dev) and `AzureCommunicationServicesEmailSender` (production)
+  - 70 unit and integration tests passing across all components

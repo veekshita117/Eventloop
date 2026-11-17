@@ -19,4 +19,6 @@ public class Registration
     public DateTime? CheckedInAt { get; set; }
     public Guid? CheckedInBy { get; set; }
     public User? CheckedInByUser { get; set; }
+
+    public DateTime? ReminderSentAt { get; set; }
 }

@@ -5,6 +5,7 @@ using Eventloop.Api.Validators;
 using Eventloop.Core.Enums;
 using Eventloop.Core.Interfaces;
 using Eventloop.Infrastructure.Data;
+using Eventloop.Infrastructure.Email;
 using Eventloop.Infrastructure.Security;
 using Eventloop.Infrastructure.Services;
 using FluentValidation;
@@ -29,11 +30,24 @@ builder.Services.AddDbContext<ApplicationDbContext>(options =>
     options.UseSqlServer(connectionString);
 });
 
+// Email Sender (Console for local dev, Azure Communication Services for prod)
+var emailProvider = builder.Configuration["Email:Provider"] ?? "Console";
+if (emailProvider.Equals("AzureCommunicationServices", StringComparison.OrdinalIgnoreCase))
+{
+    builder.Services.Configure<AzureCommunicationServicesEmailOptions>(
+        builder.Configuration.GetSection(AzureCommunicationServicesEmailOptions.SectionName));
+    builder.Services.AddSingleton<IEmailSender, AzureCommunicationServicesEmailSender>();
+}
+else
+{
+    builder.Services.AddSingleton<IEmailSender, ConsoleEmailSender>();
+}
+
 // Current user and domain services
 builder.Services.AddScoped<ICurrentUserService, CurrentUserService>();
 builder.Services.AddSingleton<IPasswordHasher, BCryptPasswordHasher>();
 builder.Services.AddSingleton<IJwtTokenGenerator, JwtTokenGenerator>();
-builder.Services.AddSingleton<IRegistrationEventPublisher, LoggingRegistrationEventPublisher>();
+builder.Services.AddSingleton<IRegistrationEventPublisher, AzureQueueRegistrationEventPublisher>();
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<IRegistrationService, RegistrationService>();
 builder.Services.AddScoped<IEventService, EventService>();

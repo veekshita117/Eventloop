@@ -47,5 +47,8 @@ public class RegistrationConfiguration : IEntityTypeConfiguration<Registration>
 
         builder.Property(r => r.CheckedInBy)
             .IsRequired(false);
+
+        builder.Property(r => r.ReminderSentAt)
+            .IsRequired(false);
     }
 }

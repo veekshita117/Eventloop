@@ -240,6 +240,8 @@ public class RegistrationService : IRegistrationService
             // Renumber remaining waitlist positions sequentially
             await RenumberWaitlistPositionsAsync(eventId, cancellationToken);
 
+            await _eventPublisher.PublishRegistrationCancelledAsync(registration, eventEntity, cancellationToken);
+
             return MapToRegistrationResponseDto(registration, eventEntity, registration.User);
         }
         finally

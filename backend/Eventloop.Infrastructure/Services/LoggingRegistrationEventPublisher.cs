@@ -36,4 +36,16 @@ public class LoggingRegistrationEventPublisher : IRegistrationEventPublisher
 
         return Task.CompletedTask;
     }
+
+    public Task PublishRegistrationCancelledAsync(Registration registration, Event eventEntity, CancellationToken cancellationToken = default)
+    {
+        _logger.LogInformation(
+            "Registration cancelled: TicketCode={TicketCode}, EventId={EventId}, EventTitle='{EventTitle}', UserId={UserId}",
+            registration.TicketCode,
+            eventEntity.Id,
+            eventEntity.Title,
+            registration.UserId);
+
+        return Task.CompletedTask;
+    }
 }
